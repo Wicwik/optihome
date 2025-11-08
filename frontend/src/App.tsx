@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { MapView } from './components/MapView'
+import { Sidebar } from './components/Sidebar'
 import { Filters, Filters as FiltersType } from './components/Filters'
 import type { Property } from './types'
 import { fetchPareto, fetchProperties } from './api/client'
@@ -22,11 +23,26 @@ export default function App() {
   }, [params])
 
   const onBoundsChange = useCallback((b: [number, number, number, number]) => setBbox(b), [])
+  const [selectedProperty, setSelectedProperty] = useState<Property | null>(null)
 
   return (
-    <div style={{ display: 'grid', gridTemplateRows: 'auto 1fr', height: '100%' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <Filters value={filters} onChange={setFilters} />
-      <MapView properties={properties} paretoIds={paretoIds} onBoundsChange={onBoundsChange} />
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        <Sidebar
+          properties={properties}
+          paretoIds={paretoIds}
+          onSelectProperty={setSelectedProperty}
+        />
+        <div style={{ flex: 1, position: 'relative' }}>
+          <MapView 
+            properties={properties} 
+            paretoIds={paretoIds} 
+            onBoundsChange={onBoundsChange}
+            selectedProperty={selectedProperty}
+          />
+        </div>
+      </div>
     </div>
   )
 }

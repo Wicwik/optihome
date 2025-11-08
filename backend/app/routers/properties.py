@@ -1,5 +1,5 @@
 from typing import Optional, List
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 
@@ -28,10 +28,14 @@ def list_properties(
         None, description="minLng,minLat,maxLng,maxLat"
     ),
     onlyPareto: bool = False,
+    include_inactive: bool = False,
     offset: int = 0,
     limit: int = 100,
 ):
     q = select(Property)
+    # Filter by active status unless explicitly including inactive
+    if not include_inactive:
+        q = q.where(Property.is_active == True)
     if type:
         q = q.where(Property.type == type)
     if min_price is not None:
@@ -94,8 +98,12 @@ def pareto(
     min_year: Optional[int] = None,
     max_year: Optional[int] = None,
     bbox: Optional[str] = None,
+    include_inactive: bool = False,
 ):
     q = select(Property)
+    # Filter by active status unless explicitly including inactive
+    if not include_inactive:
+        q = q.where(Property.is_active == True)
     if type:
         q = q.where(Property.type == type)
     if min_price is not None:
@@ -141,6 +149,14 @@ def pareto(
         if r.id in ids
     ]
     return ParetoResponse(items=out)
+
+
+@router.get("/{property_id}", response_model=PropertyOut)
+def get_property(property_id: int, db: Session = Depends(get_db)):
+    prop = db.query(Property).filter(Property.id == property_id).first()
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+    return PropertyOut.model_validate(prop)
 
 
 

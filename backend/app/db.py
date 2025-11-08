@@ -27,4 +27,11 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
 
 
+def drop_all_tables() -> None:
+    """Drop all database tables."""
+    from . import models  # noqa: F401
+    
+    Base.metadata.drop_all(bind=engine)
+
+
 

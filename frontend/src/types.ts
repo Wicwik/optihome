@@ -1,5 +1,6 @@
 export type Property = {
   id: number
+  uuid: string
   external_id: string
   url: string
   title: string
