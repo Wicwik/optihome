@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, type ReactNode } from 'react'
+import { useMemo, useState, useCallback, useRef, type ReactNode } from 'react'
 import { BarChart, Bar, AreaChart, Area, LineChart, Line, ComposedChart, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, ResponsiveContainer } from 'recharts'
 import type { Property } from '../types'
 
@@ -596,6 +596,7 @@ export function Statistics({
 }) {
   const [selectedBin, setSelectedBin] = useState<{ bin: HistogramData, title: string, getValue: (p: Property) => number | null | undefined, filterKey: 'price' | 'area' | 'rooms' | 'year' | 'price_per_m2' } | null>(null)
   const [filteredProperties, setFilteredProperties] = useState<Property[]>([])
+  const filteredSectionRef = useRef<HTMLDivElement>(null)
   const priceStats = useMemo(() => {
     try {
       return calculateStats(properties, p => p.price_eur, false, true)
@@ -649,6 +650,13 @@ export function Statistics({
     })
     setSelectedBin({ bin, title, getValue, filterKey })
     setFilteredProperties(filtered)
+    
+    // Scroll to filtered section after state update
+    setTimeout(() => {
+      if (filteredSectionRef.current) {
+        filteredSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+    }, 100)
   }, [properties])
 
   if (properties.length === 0) {
@@ -679,7 +687,7 @@ export function Statistics({
       </div>
 
       {selectedBin && (
-        <div style={{ 
+        <div ref={filteredSectionRef} style={{ 
           marginBottom: '20px', 
           padding: '16px', 
           backgroundColor: '#f0f8ff', 
