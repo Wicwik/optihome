@@ -16,6 +16,7 @@ except ImportError:
 
 
 scheduler = AsyncIOScheduler() if APSCHEDULER_AVAILABLE else None
+_scheduler_enabled = False  # Runtime flag to track if scheduler is enabled
 
 
 async def scheduled_scrape_job():
@@ -37,6 +38,7 @@ async def scheduled_scrape_job():
 
 def start_scheduler():
     """Start the scheduler if enabled."""
+    global _scheduler_enabled
     if not APSCHEDULER_AVAILABLE:
         print("APScheduler not available. Install with: pip install apscheduler")
         return
@@ -53,11 +55,58 @@ def start_scheduler():
             replace_existing=True,
         )
         scheduler.start()
+        _scheduler_enabled = True
         print(f"Scheduler started: scraping daily at {cron_hour:02d}:{cron_minute:02d}")
 
 
 def stop_scheduler():
     """Stop the scheduler."""
+    global _scheduler_enabled
     if scheduler and scheduler.running:
         scheduler.shutdown()
+        _scheduler_enabled = False
+
+
+def enable_scheduler(hour: int = 2, minute: int = 0):
+    """Enable the scheduler at runtime."""
+    global _scheduler_enabled
+    if not APSCHEDULER_AVAILABLE:
+        return {"error": "APScheduler not available"}
+    
+    if not scheduler:
+        return {"error": "Scheduler not initialized"}
+    
+    # Start scheduler if not running
+    if not scheduler.running:
+        scheduler.start()
+    
+    # Add or update the job
+    scheduler.add_job(
+        scheduled_scrape_job,
+        trigger=CronTrigger(hour=hour, minute=minute),
+        id="scrape_job",
+        replace_existing=True,
+    )
+    _scheduler_enabled = True
+    return {"status": "enabled", "schedule": f"{hour:02d}:{minute:02d}"}
+
+
+def disable_scheduler():
+    """Disable the scheduler at runtime."""
+    global _scheduler_enabled
+    if scheduler:
+        try:
+            scheduler.remove_job("scrape_job")
+            _scheduler_enabled = False
+            return {"status": "disabled"}
+        except Exception:
+            # Job might not exist
+            _scheduler_enabled = False
+            return {"status": "disabled"}
+    return {"status": "already_disabled"}
+
+
+def is_scheduler_enabled():
+    """Check if scheduler is enabled."""
+    return _scheduler_enabled and scheduler and scheduler.running
 

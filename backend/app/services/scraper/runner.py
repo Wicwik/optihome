@@ -1,9 +1,11 @@
 from sqlalchemy.orm import Session
 from typing import Iterable
+from datetime import datetime
 from .fetch import fetch
 from .parse import parse_listings, parse_detail_for_year, parse_detail_for_title
 from ...models import Property
 from ...services.geocode import geocode_with_cache
+from ...services.scraping_status import scraping_state, ScrapingStatus
 from ...schemas import PropertyCreate
 
 
@@ -12,50 +14,93 @@ BASE_URL = "https://www.nehnutelnosti.sk/"
 
 async def run_scrape(db: Session, kind: str = "flat", pages: int = 1) -> int:
     # kind: flat | house
+    async with scraping_state.lock:
+        scraping_state.status = ScrapingStatus.RUNNING
+        scraping_state.current_kind = kind
+        scraping_state.current_page = 0
+        scraping_state.total_pages = pages
+        scraping_state.items_processed = 0
+        scraping_state.items_total = 0
+        scraping_state.start_time = datetime.now()
+        scraping_state.end_time = None
+        scraping_state.error_message = None
+        scraping_state.add_log("info", f"Starting scrape: {kind}, {pages} page(s)")
+    
     count = 0
     seen_external_ids = set()  # Track which properties we've seen in this scrape
     
-    for page in range(1, pages + 1):
-        list_url = _build_list_url(kind, page)
-        html = await fetch(list_url)
-        if not html:
-            continue
-
-        items = parse_listings(html)
-        for item in items:
-            # Skip items without external_id (required)
-            if not item.get("external_id"):
+    try:
+        for page in range(1, pages + 1):
+            async with scraping_state.lock:
+                scraping_state.current_page = page
+                scraping_state.add_log("info", f"Processing page {page}/{pages} for {kind}")
+            
+            list_url = _build_list_url(kind, page)
+            html = await fetch(list_url)
+            if not html:
+                async with scraping_state.lock:
+                    scraping_state.add_log("warning", f"Failed to fetch page {page}")
                 continue
-            # Track that we've seen this property
-            seen_external_ids.add(item["external_id"])
-            # Fetch detail page for year built and title (if missing)
-            year = None
-            title = item.get("title", "").strip()
-            try:
-                detail_html = await fetch(item["url"]) if item.get("url") else None
-                if detail_html:
-                    year = parse_detail_for_year(detail_html)
-                    # If title is missing from listing, try to get it from detail page
-                    if not title:
-                        detail_title = parse_detail_for_title(detail_html)
-                        if detail_title:
-                            title = detail_title
-                            item["title"] = title
-            except Exception:
-                pass
-            upsert_property(db, item, kind, year)
-            count += 1
-        db.commit()
-    
-    # Mark properties of this type that weren't seen as inactive (soft-delete)
-    if seen_external_ids:
-        db.query(Property).filter(
-            Property.type == kind,
-            Property.external_id.notin_(seen_external_ids)
-        ).update({"is_active": False}, synchronize_session=False)
-        db.commit()
-    
-    return count
+
+            items = parse_listings(html)
+            async with scraping_state.lock:
+                scraping_state.items_total = len(items)
+                scraping_state.add_log("info", f"Found {len(items)} items on page {page}")
+            
+            for idx, item in enumerate(items):
+                # Skip items without external_id (required)
+                if not item.get("external_id"):
+                    continue
+                # Track that we've seen this property
+                seen_external_ids.add(item["external_id"])
+                # Fetch detail page for year built and title (if missing)
+                year = None
+                title = item.get("title", "").strip()
+                try:
+                    detail_html = await fetch(item["url"]) if item.get("url") else None
+                    if detail_html:
+                        year = parse_detail_for_year(detail_html)
+                        # If title is missing from listing, try to get it from detail page
+                        if not title:
+                            detail_title = parse_detail_for_title(detail_html)
+                            if detail_title:
+                                title = detail_title
+                                item["title"] = title
+                except Exception as e:
+                    async with scraping_state.lock:
+                        scraping_state.add_log("warning", f"Error fetching detail for {item.get('external_id')}: {str(e)}")
+                
+                upsert_property(db, item, kind, year)
+                count += 1
+                async with scraping_state.lock:
+                    scraping_state.items_processed = count
+                    if idx % 10 == 0 or idx == len(items) - 1:  # Log every 10th item or last item
+                        scraping_state.add_log("debug", f"Processed {count} properties so far")
+            db.commit()
+        
+        # Mark properties of this type that weren't seen as inactive (soft-delete)
+        if seen_external_ids:
+            async with scraping_state.lock:
+                scraping_state.add_log("info", f"Marking unseen properties as inactive")
+            db.query(Property).filter(
+                Property.type == kind,
+                Property.external_id.notin_(seen_external_ids)
+            ).update({"is_active": False}, synchronize_session=False)
+            db.commit()
+        
+        async with scraping_state.lock:
+            scraping_state.status = ScrapingStatus.COMPLETED
+            scraping_state.end_time = datetime.now()
+            scraping_state.add_log("info", f"Scrape completed: {count} properties processed")
+        
+        return count
+    except Exception as e:
+        async with scraping_state.lock:
+            scraping_state.status = ScrapingStatus.ERROR
+            scraping_state.end_time = datetime.now()
+            scraping_state.error_message = str(e)
+            scraping_state.add_log("error", f"Scrape failed: {str(e)}")
+        raise
 
 
 def upsert_property(db: Session, item: dict, kind: str, year_built: int | None) -> None:

@@ -45,11 +45,15 @@ export function MapView({
   paretoIds,
   onBoundsChange,
   selectedProperty,
+  locationCoords,
+  resetTrigger,
 }: {
   properties: Property[]
   paretoIds: Set<number>
   onBoundsChange: (bbox: [number, number, number, number]) => void
   selectedProperty: Property | null
+  locationCoords?: { lat: number; lng: number } | null
+  resetTrigger?: number
 }) {
   const propertiesWithCoords = properties.filter(p => p.lat != null && p.lng != null)
 
@@ -59,6 +63,8 @@ export function MapView({
       <BoundsWatcher onBoundsChange={onBoundsChange} />
       <MarkerCluster markers={propertiesWithCoords} paretoIds={paretoIds} selectedProperty={selectedProperty} />
       <PropertyCenter selectedProperty={selectedProperty} />
+      <LocationCenter locationCoords={locationCoords} />
+      <MapReset resetTrigger={resetTrigger} />
     </MapContainer>
   )
 }
@@ -168,6 +174,37 @@ function PropertyCenter({ selectedProperty }: { selectedProperty: Property | nul
       })
     }
   }, [map, selectedProperty])
+
+  return null
+}
+
+function LocationCenter({ locationCoords }: { locationCoords?: { lat: number; lng: number } | null }) {
+  const map = useMap()
+
+  useEffect(() => {
+    if (locationCoords) {
+      map.setView([locationCoords.lat, locationCoords.lng], 12, {
+        animate: true,
+        duration: 0.8,
+      })
+    }
+  }, [map, locationCoords])
+
+  return null
+}
+
+function MapReset({ resetTrigger }: { resetTrigger?: number }) {
+  const map = useMap()
+
+  useEffect(() => {
+    if (resetTrigger !== undefined && resetTrigger > 0) {
+      // Reset to default view (Bratislava center)
+      map.setView([48.1486, 17.1077], 11, {
+        animate: true,
+        duration: 0.5,
+      })
+    }
+  }, [map, resetTrigger])
 
   return null
 }

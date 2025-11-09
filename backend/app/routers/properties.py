@@ -7,6 +7,7 @@ from ..db import get_db
 from ..models import Property
 from ..schemas import PropertiesResponse, PropertyOut, ParetoResponse, ParetoItem
 from ..services.pareto import skyline
+from ..services.geocode import geocode_with_cache
 
 
 router = APIRouter()
@@ -24,6 +25,7 @@ def list_properties(
     max_area: Optional[float] = None,
     min_year: Optional[int] = None,
     max_year: Optional[int] = None,
+    location: Optional[str] = Query(None, description="Filter by location (case-insensitive substring match on address)"),
     bbox: Optional[str] = Query(
         None, description="minLng,minLat,maxLng,maxLat"
     ),
@@ -54,6 +56,8 @@ def list_properties(
         q = q.where(Property.year_built >= min_year)
     if max_year is not None:
         q = q.where(Property.year_built <= max_year)
+    if location:
+        q = q.where(Property.address.ilike(f"%{location}%"))
     if bbox:
         try:
             min_lng, min_lat, max_lng, max_lat = map(float, bbox.split(","))
@@ -97,6 +101,7 @@ def pareto(
     max_area: Optional[float] = None,
     min_year: Optional[int] = None,
     max_year: Optional[int] = None,
+    location: Optional[str] = Query(None, description="Filter by location (case-insensitive substring match on address)"),
     bbox: Optional[str] = None,
     include_inactive: bool = False,
 ):
@@ -122,6 +127,8 @@ def pareto(
         q = q.where(Property.year_built >= min_year)
     if max_year is not None:
         q = q.where(Property.year_built <= max_year)
+    if location:
+        q = q.where(Property.address.ilike(f"%{location}%"))
     if bbox:
         try:
             min_lng, min_lat, max_lng, max_lat = map(float, bbox.split(","))
@@ -149,6 +156,19 @@ def pareto(
         if r.id in ids
     ]
     return ParetoResponse(items=out)
+
+
+@router.get("/geocode")
+def geocode_location(
+    query: str = Query(..., description="Location string to geocode"),
+    db: Session = Depends(get_db),
+):
+    """Geocode a location string to coordinates."""
+    coords = geocode_with_cache(db, query)
+    if not coords:
+        raise HTTPException(status_code=404, detail="Location not found")
+    db.commit()  # Commit any cache entries
+    return {"lat": coords[0], "lng": coords[1]}
 
 
 @router.get("/{property_id}", response_model=PropertyOut)
